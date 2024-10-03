@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistente de RH - Análise de Currículos</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #header {
+            display: flex;
+            justify-content: space-between;
+            width: 80%;
+            margin-bottom: 20px;
+        }
+        #candidateCount {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        #inputContainer, #jobDescriptionContainer {
+            display: flex;
+            margin-top: 20px;
+            width: 80%;
+            align-items: center;
+        }
+        #jobDescription {
+            padding: 10px;
+            border: 2px solid #4caf50;
+            border-radius: 5px;
+            width: calc(70% - 20px);
+        }
+        #pdfInput {
+            padding: 10px;
+            border: 2px solid #4caf50;
+            border-radius: 5px;
+            width: calc(70% - 20px);
+        }
+        #uploadButton, #analyzeButton {
+            padding: 10px;
+            background-color: #4caf50;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin-left: 10px;
+        }
+        #uploadButton:hover, #analyzeButton:hover {
+            background-color: #388e3c;
+        }
+        #loadingOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(5px);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            font-size: 20px;
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            width: 80%;
+            margin-top: 20px;
+        }
+        #resultsContainer {
+            border: 2px solid #4caf50;
+            padding: 10px;
+            width: 100%;
+            background-color: #fff;
+            overflow-y: auto;
+            max-height: 400px;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);
+        }
+        .result {
+            border-bottom: 1px solid #ccc;
+            padding: 10px;
+        }
+
+        strong{
+            color: #05950a;
+        }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>Assistente de RH - Análise de Currículos</h1>
+        <div id="candidateCount">Candidatos cadastrados: <span id="count">0</span></div>
+    </div>
+
+    <div id="jobDescriptionContainer">
+        <input type="text" id="jobDescription" placeholder="Descrição da Vaga" />
+    </div>
+    
+    <div id="inputContainer">
+        <input type="file" id="pdfInput" accept="application/pdf" />
+        <button id="uploadButton">Adicionar Currículo</button>
+        <button id="analyzeButton" style="display: none;">Iniciar Análise</button>
+    </div>
+    
+    <div id="loadingOverlay">Carregando...</div>
+    
+    <div class="container">
+        <div id="resultsContainer"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "@google/generative-ai": "https://esm.run/@google/generative-ai"
+            }
+        }
+    </script>
+    <script type="module">
+    import { GoogleGenerativeAI } from "@google/generative-ai";
+
+    const API_KEY = "AIzaSyBfJrzeRAPn1aJOsHJyhdfNcxkOaKJJgOk";
+    const genAI = new GoogleGenerativeAI(API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    let curriculos = [];
+
+    document.getElementById('uploadButton').addEventListener('click', async () => {
+        const file = document.getElementById('pdfInput').files[0];
+
+        if (!file) {
+            return;
+        }
+
+        document.getElementById('loadingOverlay').style.display = 'flex';
+
+        try {
+            const curriculumContent = await extractTextFromPDF(file);
+            curriculos.push(curriculumContent);
+            document.getElementById('count').innerText = curriculos.length;
+
+            document.getElementById('pdfInput').value = '';
+            document.getElementById('analyzeButton').style.display = 'block';
+        } catch (error) {
+            console.error('Erro ao processar o PDF:', error);
+        } finally {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+    });
+
+    async function extractTextFromPDF(file) {
+        const pdfData = await pdfjsLib.getDocument(URL.createObjectURL(file)).promise;
+        let text = '';
+        for (let i = 1; i <= pdfData.numPages; i++) {
+            const page = await pdfData.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(' ') + '\n';
+        }
+        return text;
+    }
+
+    document.getElementById('analyzeButton').addEventListener('click', async () => {
+        const jobDescription = document.getElementById('jobDescription').value;
+        if (!jobDescription || curriculos.length === 0) {
+            return;
+        }
+
+        document.getElementById('loadingOverlay').style.display = 'flex';
+
+        try {
+            const results = await analyzeCurriculos(jobDescription, curriculos);
+            displayResults(results);
+        } catch (error) {
+            console.error('Erro ao analisar os currículos:', error);
+        } finally {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+    });
+
+    async function analyzeCurriculos(jobDescription, curriculos) {
+        const results = [];
+
+        for (let i = 0; i < curriculos.length; i++) {
+            const curriculumContent = curriculos[i];
+
+            // Solicitar o nome do candidato
+            const namePrompt = `Extraia o nome do candidato no seguinte currículo, retorne apenas o nome: "${curriculumContent}".`;
+            const nameResult = await model.generateContent(namePrompt);
+            const nameResponse = await nameResult.response;
+            const candidateName = await nameResponse.text();
+
+            // Solicitar a justificativa
+            const explanationPrompt = `Justifique como o currículo a seguir se encaixa na descrição da vaga: "${jobDescription}". Currículo: "${curriculumContent}". A justificativa deve ser no máximo de 200 caracteres.`;
+            const explanationResult = await model.generateContent(explanationPrompt);
+            const explanationResponse = await explanationResult.response;
+            const explanationText = await explanationResponse.text();
+
+            // Solicitar a pontuação
+            const scorePrompt = `Avalie o seguinte currículo em relação à descrição da vaga: "${jobDescription}". Currículo: "${curriculumContent}". Dê uma nota de 0 a 100 e justifique.`;
+            const scoreResult = await model.generateContent(scorePrompt);
+            const scoreResponse = await scoreResult.response;
+            const scoreText = await scoreResponse.text();
+
+            const scoreMatch = scoreText.match(/(\d+(\.\d+)?)/);
+            const score = scoreMatch ? parseFloat(scoreMatch[0]) : 0;
+
+            results.push({ name: candidateName.trim() || `Candidato ${i + 1}`, explanation: explanationText, score });
+        }
+
+        results.sort((a, b) => b.score - a.score);
+        return results;
+    }
+
+    function displayResults(results) {
+        const resultsContainer = document.getElementById('resultsContainer');
+        resultsContainer.innerHTML = '';
+
+        results.forEach((result) => {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = `<h2><strong>Candidato: </strong>${result.name}</h2> <h3><strong>Justificativa:</strong></h3> ${result.explanation} <h3><strong>Pontuação:</strong></h3> ${result.score.toFixed(2)}`;
+            resultsContainer.appendChild(resultDiv);
+        });
+    }
+    </script>
+</body>
+</html>
